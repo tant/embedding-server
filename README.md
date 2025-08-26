@@ -9,6 +9,10 @@ Features
 - Model load on startup, health and readiness probes.
 - Input validation (max items, max text length), CORS enabled.
 - Configurable via environment variables.
+- Enhanced error handling with detailed error messages.
+- Improved logging with file output capability.
+- Comprehensive test suite with coverage for error conditions.
+- Graceful handling of model loading failures.
 
 Requirements
 - Python 3.11+
@@ -20,6 +24,9 @@ Install with uv (recommended)
 ```bash
 # create/refresh .venv and install deps from pyproject
 uv sync
+
+# Install development dependencies (optional)
+uv sync --extra dev
 
 # activate venv (optional, but nice for shell tools)
 source .venv/bin/activate
@@ -60,13 +67,8 @@ EMBED_BATCH_SIZE=32
 EMBED_CORS_ORIGINS=*
 EMBED_SKIP_MODEL_LOAD=0
 EMBED_MODEL_CACHE= # Optional: set model cache dir (HuggingFace cache)
-+EMBED_DEVICE=cpu
-+EMBED_MODEL_NAME=BAAI/bge-m3-large
-+EMBED_MAX_ITEMS=128
-+EMBED_MAX_TEXT_LEN=2048
-+EMBED_BATCH_SIZE=32
-+EMBED_CORS_ORIGINS=*
-+EMBED_SKIP_MODEL_LOAD=0
+```
+
 Khi chạy bằng uv hoặc uvicorn, các biến trong `.env.local` sẽ tự động được nạp nếu bạn dùng [uv](https://github.com/astral-sh/uv) hoặc [python-dotenv]. Nếu không, bạn có thể export thủ công:
 
 ```bash
@@ -75,12 +77,23 @@ export $(grep -v '^#' .env.local | xargs)
 
 Port mặc định của uvicorn là **8000**. Để đổi port, bạn phải export PORT hoặc chỉ định --port khi chạy uvicorn.
 **Lưu ý:** EMBED_PORT chỉ dùng cho app nội bộ, không ảnh hưởng đến uvicorn.
-```
 
-Khi chạy bằng uv hoặc uvicorn, các biến trong `.env.local` sẽ tự động được nạp nếu bạn dùng [uv](https://github.com/astral-sh/uv) hoặc [python-dotenv]. Nếu không, bạn có thể export thủ công:
 
+Logging
+-------
+The application uses a logging configuration file (`logging.conf`) to manage log output. By default, logs are written to both the console and a file named `embedding-server.log` in the root directory. You can modify the `logging.conf` file to change the logging behavior, such as log file location, log levels, or formatting.
+
+Run tests (optional)
+--------------------
 ```bash
-export $(grep -v '^#' .env.local | xargs)
+# Run tests
+uv run pytest -v
+
+# Run tests with coverage
+uv run pytest -v --cov=main tests/
+
+# Run tests with coverage and generate HTML report
+uv run pytest -v --cov=main --cov-report=html tests/
 ```
 
 Endpoints
@@ -95,12 +108,8 @@ curl -s http://localhost:8000/embed/ \
 	-d '{"texts": ["Xin chao", "Hello world!"]}' | jq
 ```
 
-Run tests (optional)
-```bash
-uv run pytest -q
-```
-
 Notes
 - When using GPU, keep workers=1 to avoid multiple processes loading the same model.
 - For scaling, prefer multiple instances behind a load balancer rather than multi-process sharing a single GPU.
-
+- The application gracefully handles model loading failures, logging the error and marking the service as not ready.
+- CORS is configured to allow all origins by default, but you should specify exact origins in production for security.

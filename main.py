@@ -1,6 +1,7 @@
 
 import os
 import logging
+import logging.config
 from typing import List
 
 # --- Load .env.local if present (before any config/env usage) ---
@@ -25,6 +26,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
+
+# Configure logging
+try:
+    logging.config.fileConfig('logging.conf')
+    logger = logging.getLogger('embedding-server')
+except Exception:
+    # Fallback to basic logging configuration
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+    logger = logging.getLogger("embedding-server")
 
 # ----------------------------------------------------------------------------
 # App & Config
@@ -54,10 +64,18 @@ SKIP_MODEL_LOAD = os.getenv("EMBED_SKIP_MODEL_LOAD", "0") in {"1", "true", "yes"
 app = FastAPI(title=APP_TITLE, description=APP_DESC, version=APP_VERSION)
 
 # CORS: allow all by default; tighten in production via env if needed
+# In production, specify exact origins instead of using "*"
 allow_origins = os.getenv("EMBED_CORS_ORIGINS", "*")
+allow_origins_list = [o.strip() for o in allow_origins.split(",")] if allow_origins != "*" else ["*"]
+
+# Validate CORS origins in production
+if allow_origins != "*" and len(allow_origins_list) == 0:
+    logger.warning("EMBED_CORS_ORIGINS is set but contains no valid origins. Defaulting to '*' for development.")
+    allow_origins_list = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in allow_origins.split(",")],
+    allow_origins=allow_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,12 +120,12 @@ def load_model_on_startup() -> None:
     try:
         # Import here to avoid requiring torch during dummy runs
         from sentence_transformers import SentenceTransformer
-            hf_token = os.getenv("HF_TOKEN")
-            model = SentenceTransformer(
-                MODEL_NAME,
-                device=device,
-                use_auth_token=hf_token if hf_token else None
-            )
+        hf_token = os.getenv("HF_TOKEN")
+        model = SentenceTransformer(
+            MODEL_NAME,
+            device=device,
+            use_auth_token=hf_token if hf_token else None
+        )
         app.state.model = model
         app.state.model_name = MODEL_NAME
         logger.info("Model loaded and ready.")
@@ -116,6 +134,8 @@ def load_model_on_startup() -> None:
         # Keep a flag to indicate readiness failure
         app.state.model = None
         app.state.model_name = MODEL_NAME
+        # In production, you might want to exit the application if model loading fails
+        # sys.exit(1)  # Uncomment this line if you want the app to exit on model load failure
 
 
 @app.get("/health")
@@ -158,7 +178,7 @@ def _validate_texts(texts: List[str]) -> None:
 async def create_embeddings(request: EmbeddingRequest) -> dict:
     model = getattr(app.state, "model", None)
     if model is None:
-        raise HTTPException(status_code=503, detail="Model not ready.")
+        raise HTTPException(status_code=503, detail="Model not ready. Please check the application logs for model loading errors.")
 
     _validate_texts(request.texts)
 
@@ -172,7 +192,9 @@ async def create_embeddings(request: EmbeddingRequest) -> dict:
         )
     except Exception as exc:
         logger.exception("Embedding failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Embedding failed.")
+        # Provide more detailed error information (be careful with sensitive information in production)
+        error_detail = f"Embedding failed: {str(exc)}"
+        raise HTTPException(status_code=500, detail=error_detail)
 
     embeddings_list = embeddings.tolist()
     return {
