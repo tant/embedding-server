@@ -49,10 +49,15 @@ You can run the server without manually activating the virtual environment:
 
 # Method 1: Export PORT from .env.local (recommended)
 export $(grep -v '^#' .env.local | xargs)
-uv run uvicorn main:app --host 0.0.0.0 --workers 1
+# Prefer running uvicorn as a module when using `uv` so the server is executed
+# from the uv-managed environment. Using the plain `uv run uvicorn ...` form
+# can fail if the `uvicorn` script isn't available on PATH inside the run
+# environment; the `-m` form avoids that by executing the installed package.
+uv run -m uvicorn main:app --host 0.0.0.0 --workers 1
 
 # Method 2: Specify --port directly
-uv run uvicorn main:app --host 0.0.0.0 --port 7979 --workers 1
+# Use the module form to ensure uv runs the package from its environment:
+uv run -m uvicorn main:app --host 0.0.0.0 --port 7979 --workers 1
 
 # For CUDA support (ensure torch build is correct)
 EMBED_DEVICE=cuda uv run uvicorn main:app --host 0.0.0.0 --port 7979 --workers 1

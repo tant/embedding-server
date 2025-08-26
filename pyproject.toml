@@ -3,7 +3,6 @@ name = "embedding-server"
 version = "0.1.0"
 description = "FastAPI-based sentence-embedding server (CPU-first) using Sentence-Transformers"
 readme = "README.md"
-repository = "https://github.com/tant/embedding-server"
 urls = { "Homepage" = "https://github.com/tant/embedding-server" }
 requires-python = ">=3.11"
 dependencies = [
