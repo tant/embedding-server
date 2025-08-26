@@ -193,7 +193,7 @@ toml = [
 ]
 
 [[package]]
-name = "embbeding-server"
+name = "embedding-server"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
