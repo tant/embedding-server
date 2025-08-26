@@ -1,7 +1,15 @@
 import os
 import logging
 import logging.config
-from typing import List
+from typing import List, Union, Optional
+from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
+from contextlib import asynccontextmanager
+import base64
+import numpy as np
+import tiktoken
 
 # --- Load .env.local if present (before any config/env usage) ---
 try:
@@ -26,12 +34,6 @@ try:
     import torch  # optional at import time
 except Exception:  # pragma: no cover
     torch = None
-
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from starlette.concurrency import run_in_threadpool
-from contextlib import asynccontextmanager
 
 # Configure logging
 try:
@@ -170,13 +172,55 @@ def ready() -> dict:
     }
 
 
-class EmbeddingRequest(BaseModel):
-    texts: List[str]
+class OpenAIEmbeddingRequest(BaseModel):
+    input: Union[str, List[str]]
+    model: Optional[str] = None
+    encoding_format: Optional[str] = "float"
 
 
-def _validate_texts(texts: List[str]) -> None:
+@app.post("/v1/embeddings")
+async def openai_embeddings(request: OpenAIEmbeddingRequest):
+    """
+    OpenAI-compatible embeddings endpoint.
+    Accepts: {
+      "input": string | list[string],
+      "model": string (optional),
+      "encoding_format": "float" | "base64" (optional)
+    }
+    Returns: {
+      "object": "list",
+      "data": [...],
+      "model": string,
+      "usage": {"prompt_tokens": int, "total_tokens": int}
+    }
+    """
+    model_obj = getattr(app.state, "model", None)
+    model_name = getattr(app.state, "model_name", MODEL_NAME)
+    if model_obj is None:
+        raise HTTPException(status_code=503, detail="Model not ready. Please check the application logs for model loading errors.")
+
+    # Validate model name if provided
+    if request.model and request.model != model_name:
+        return {
+            "error": {
+                "message": f"The model '{request.model}' does not match the loaded model '{model_name}'",
+                "type": "invalid_request_error",
+                "param": "model",
+                "code": "model_not_found"
+            }
+        }
+
+    # Determine input list
+    if isinstance(request.input, str):
+        texts = [request.input]
+    elif isinstance(request.input, list) and all(isinstance(t, str) for t in request.input):
+        texts = request.input
+    else:
+        raise HTTPException(status_code=400, detail="'input' must be a string or list of strings.")
+
+    # Validate texts (reuse existing logic)
     if not texts:
-        raise HTTPException(status_code=400, detail="'texts' must be a non-empty list of strings.")
+        raise HTTPException(status_code=400, detail="'input' must be a non-empty string or list of strings.")
     if len(texts) > MAX_ITEMS:
         raise HTTPException(status_code=400, detail=f"Too many items: {len(texts)} > {MAX_ITEMS}.")
     for i, t in enumerate(texts):
@@ -187,36 +231,42 @@ def _validate_texts(texts: List[str]) -> None:
         if len(t) > MAX_TEXT_LEN:
             raise HTTPException(status_code=400, detail=f"Text at index {i} exceeds {MAX_TEXT_LEN} characters.")
 
-
-@app.post("/embed/")
-async def create_embeddings(request: EmbeddingRequest) -> dict:
-    model = getattr(app.state, "model", None)
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not ready. Please check the application logs for model loading errors.")
-
-    _validate_texts(request.texts)
-
     try:
         embeddings = await run_in_threadpool(
-            model.encode,
-            request.texts,
+            model_obj.encode,
+            texts,
             normalize_embeddings=True,
             batch_size=BATCH_SIZE,
             show_progress_bar=False,
         )
     except Exception as exc:
         logger.exception("Embedding failed: %s", exc)
-        # Provide more detailed error information (be careful with sensitive information in production)
         error_detail = f"Embedding failed: {str(exc)}"
         raise HTTPException(status_code=500, detail=error_detail)
 
     embeddings_list = embeddings.tolist()
+    encoding_format = (request.encoding_format or "float").lower()
+    data = []
+    for i, emb in enumerate(embeddings_list):
+        if encoding_format == "base64":
+            arr = np.array(emb, dtype=np.float32)
+            emb_bytes = arr.tobytes()
+            emb_out = base64.b64encode(emb_bytes).decode("utf-8")
+        else:
+            emb_out = emb
+        data.append({"object": "embedding", "embedding": emb_out, "index": i})
+
+    # Calculate usage (token count) if possible
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        prompt_tokens = sum(len(enc.encode(t)) for t in texts)
+    except Exception:
+        prompt_tokens = 0
+    usage = {"prompt_tokens": prompt_tokens, "total_tokens": prompt_tokens}
+
     return {
         "object": "list",
-        "model": getattr(app.state, "model_name", MODEL_NAME),
-        "device": getattr(app.state, "device", None),
-        "data": [
-            {"object": "embedding", "embedding": emb, "index": i}
-            for i, emb in enumerate(embeddings_list)
-        ],
+        "data": data,
+        "model": request.model or model_name,
+        "usage": usage,
     }
