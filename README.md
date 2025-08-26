@@ -64,7 +64,6 @@ You should configure environment variables in the `.env.local` file (a sample is
 
 ```env
 # .env.local
-EMBED_PORT=7979
 EMBED_DEVICE=cpu
 EMBED_MODEL_NAME=BAAI/bge-m3-unsupervised
 EMBED_MAX_ITEMS=128
@@ -72,7 +71,10 @@ EMBED_MAX_TEXT_LEN=2048
 EMBED_BATCH_SIZE=32
 EMBED_CORS_ORIGINS=*
 EMBED_SKIP_MODEL_LOAD=0
-EMBED_MODEL_CACHE= # Optional: set model cache dir (HuggingFace cache)
+EMBED_MODEL_CACHE= # Optional: path to a local HF cache/snapshot (see notes below)
+EMBED_APP_TITLE=Embedding API
+EMBED_APP_DESC=API to generate sentence embeddings using Sentence-Transformers.
+EMBED_APP_VERSION=1.1.0
 ```
 
 When running with uv or uvicorn, variables in `.env.local` will be automatically loaded if you use [uv](https://github.com/astral-sh/uv) or [python-dotenv]. Otherwise, you can export them manually:
@@ -83,6 +85,17 @@ export $(grep -v '^#' .env.local | xargs)
 
 Note: The default uvicorn port is **8000**. To change the port, you must export PORT or specify --port when running uvicorn. 
 **Important:** EMBED_PORT is only used internally and does not affect uvicorn.
+
+HuggingFace cache & token notes
+--------------------------------
+- If you set `EMBED_MODEL_CACHE`, the application maps it to `HF_HOME` so HuggingFace tools use that directory. Avoid using `TRANSFORMERS_CACHE` directly as it is deprecated.
+- To authenticate private models or increase rate limits, set a token in the environment. The app reads `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN` and will export it as `HUGGINGFACE_HUB_TOKEN` before loading models. Example:
+
+```env
+HUGGINGFACE_HUB_TOKEN=hf_xxx...
+```
+
+`.env.local.sample` is provided at the project root with a full example and usage notes — copy it to `.env.local` and edit values for your deployment.
 
 ## Logging
 

@@ -14,7 +14,13 @@ except ImportError:
 _model_cache = os.getenv("EMBED_MODEL_CACHE")
 if _model_cache:
     os.environ["HF_HOME"] = _model_cache
-    os.environ["TRANSFORMERS_CACHE"] = _model_cache
+    # Use HF_HOME (preferred). Avoid setting TRANSFORMERS_CACHE to prevent
+    # deprecation warnings from transformers (TRANSFORMERS_CACHE is deprecated).
+
+# Read logging overrides from environment early so they can be applied
+LOG_FILE = os.getenv("LOG_FILE")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 
 try:
     import torch  # optional at import time
@@ -32,16 +38,17 @@ try:
     logging.config.fileConfig('logging.conf')
     logger = logging.getLogger('embedding-server')
 except Exception:
-    # Fallback to basic logging configuration
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+    # Fallback: respect LOG_FILE/LOG_LEVEL env if provided
+    level = getattr(logging, LOG_LEVEL, logging.INFO)
+    handlers = [logging.StreamHandler()]
+    if LOG_FILE:
+        handlers.append(logging.FileHandler(LOG_FILE))
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s: %(message)s", handlers=handlers)
     logger = logging.getLogger("embedding-server")
 
 # ----------------------------------------------------------------------------
 # App & Config
 # ----------------------------------------------------------------------------
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
-logger = logging.getLogger("embedding-server")
 
 
 APP_TITLE = os.getenv("EMBED_APP_TITLE", "Embedding API")
@@ -90,11 +97,16 @@ async def lifespan(app: FastAPI):
         try:
             # Import here to avoid requiring torch during dummy runs
             from sentence_transformers import SentenceTransformer
-            hf_token = os.getenv("HF_TOKEN")
+            # Read huggingface hub token from the standard env var.
+            # Only `HUGGINGFACE_HUB_TOKEN` is supported; HF_TOKEN has been removed.
+            hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN")
+            if hf_token:
+                # nothing to change; ensure availability for huggingface internals
+                os.environ["HUGGINGFACE_HUB_TOKEN"] = hf_token
+
             model = SentenceTransformer(
                 MODEL_NAME,
                 device=device,
-                use_auth_token=hf_token if hf_token else None
             )
             app.state.model = model
             app.state.model_name = MODEL_NAME
