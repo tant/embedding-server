@@ -1,0 +1,20 @@
+[project]
+name = "embbeding-server"
+version = "0.1.0"
+description = "FastAPI-based sentence-embedding server (CPU-first) using Sentence-Transformers"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+	"fastapi>=0.110",
+	"uvicorn[standard]>=0.27",
+	"sentence-transformers>=2.2.2",
+	# torch should be installed per-environment (CPU/GPU). Keep a floor only.
+	"torch>=2.0",
+	"pydantic>=2.0",
+	"python-dotenv>=1.0.0",
+]
+[tool.uv]
+# Optional: if using uv package manager
+index-url = "https://pypi.org/simple"
+extra-index-url = []
+
