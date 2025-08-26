@@ -1,5 +1,5 @@
 [project]
-name = "embbeding-server"
+name = "embedding-server"
 version = "0.1.0"
 description = "FastAPI-based sentence-embedding server (CPU-first) using Sentence-Transformers"
 readme = "README.md"
