@@ -1,4 +1,3 @@
-
 import os
 import logging
 import logging.config
@@ -26,6 +25,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
+from contextlib import asynccontextmanager
 
 # Configure logging
 try:
@@ -60,8 +60,58 @@ BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
 SKIP_MODEL_LOAD = os.getenv("EMBED_SKIP_MODEL_LOAD", "0") in {"1", "true", "yes"}
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load model on startup
+    device = resolve_device()
+    app.state.device = device
+    if SKIP_MODEL_LOAD:
+        logger.info("EMBED_SKIP_MODEL_LOAD=1 detected; skipping real model load (using dummy model).")
 
-app = FastAPI(title=APP_TITLE, description=APP_DESC, version=APP_VERSION)
+        class _DummyModel:
+            def __init__(self, dim: int = 1024):
+                self.dim = dim
+
+            def encode(self, texts: List[str], normalize_embeddings: bool = True, batch_size: int = 32, show_progress_bar: bool = False):
+                import numpy as np
+                rs = np.random.RandomState(42)
+                out = rs.randn(len(texts), self.dim).astype("float32")
+                if normalize_embeddings:
+                    norms = np.linalg.norm(out, axis=1, keepdims=True)
+                    norms[norms == 0] = 1
+                    out = out / norms
+                return out
+
+        app.state.model = _DummyModel()
+        app.state.model_name = f"dummy::{MODEL_NAME}"
+        logger.info("Dummy model ready.")
+    else:
+        logger.info("Loading model '%s' on device=%s ...", MODEL_NAME, device)
+        try:
+            # Import here to avoid requiring torch during dummy runs
+            from sentence_transformers import SentenceTransformer
+            hf_token = os.getenv("HF_TOKEN")
+            model = SentenceTransformer(
+                MODEL_NAME,
+                device=device,
+                use_auth_token=hf_token if hf_token else None
+            )
+            app.state.model = model
+            app.state.model_name = MODEL_NAME
+            logger.info("Model loaded and ready.")
+        except Exception as exc:
+            logger.exception("Failed to load model: %s", exc)
+            # Keep a flag to indicate readiness failure
+            app.state.model = None
+            app.state.model_name = MODEL_NAME
+
+    yield
+
+    # Cleanup (if needed)
+    pass
+
+
+app = FastAPI(title=APP_TITLE, description=APP_DESC, version=APP_VERSION, lifespan=lifespan)
 
 # CORS: allow all by default; tighten in production via env if needed
 # In production, specify exact origins instead of using "*"
@@ -88,54 +138,6 @@ def resolve_device() -> str:
             return "cuda"
         logger.warning("CUDA requested but not available; falling back to CPU.")
     return "cpu"
-
-
-@app.on_event("startup")
-def load_model_on_startup() -> None:
-    device = resolve_device()
-    app.state.device = device
-    if SKIP_MODEL_LOAD:
-        logger.info("EMBED_SKIP_MODEL_LOAD=1 detected; skipping real model load (using dummy model).")
-
-        class _DummyModel:
-            def __init__(self, dim: int = 1024):
-                self.dim = dim
-
-            def encode(self, texts: List[str], normalize_embeddings: bool = True, batch_size: int = 32, show_progress_bar: bool = False):
-                import numpy as np
-                rs = np.random.RandomState(42)
-                out = rs.randn(len(texts), self.dim).astype("float32")
-                if normalize_embeddings:
-                    norms = np.linalg.norm(out, axis=1, keepdims=True)
-                    norms[norms == 0] = 1
-                    out = out / norms
-                return out
-
-        app.state.model = _DummyModel()
-        app.state.model_name = f"dummy::{MODEL_NAME}"
-        logger.info("Dummy model ready.")
-        return
-
-    logger.info("Loading model '%s' on device=%s ...", MODEL_NAME, device)
-    try:
-        # Import here to avoid requiring torch during dummy runs
-        from sentence_transformers import SentenceTransformer
-        hf_token = os.getenv("HF_TOKEN")
-        model = SentenceTransformer(
-            MODEL_NAME,
-            device=device,
-            use_auth_token=hf_token if hf_token else None
-        )
-        app.state.model = model
-        app.state.model_name = MODEL_NAME
-        logger.info("Model loaded and ready.")
-    except Exception as exc:
-        logger.exception("Failed to load model: %s", exc)
-        # Keep a flag to indicate readiness failure
-        app.state.model = None
-        app.state.model_name = MODEL_NAME
-        # In production, you might want to exit the application if model loading fails
-        # sys.exit(1)  # Uncomment this line if you want the app to exit on model load failure
 
 
 @app.get("/health")

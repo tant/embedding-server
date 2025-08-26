@@ -1,60 +1,66 @@
-Embedding Server (FastAPI + Sentence-Transformers)
+# Embedding Server (FastAPI + Sentence-Transformers)
 
-Overview
-- A simple, production-leaning API to generate sentence embeddings.
-- Defaults to CPU to avoid GPU VRAM issues; you can opt-in to CUDA via env.
+A production-ready API server for generating sentence embeddings using FastAPI and Sentence-Transformers.
 
-Features
-- Async FastAPI endpoint with threadpool offloading.
-- Model load on startup, health and readiness probes.
-- Input validation (max items, max text length), CORS enabled.
-- Configurable via environment variables.
-- Enhanced error handling with detailed error messages.
-- Improved logging with file output capability.
-- Comprehensive test suite with coverage for error conditions.
-- Graceful handling of model loading failures.
+Repository: https://github.com/tant/embedding-server
 
-Requirements
+## Overview
+
+This is a simple, production-leaning API to generate sentence embeddings. It defaults to CPU to avoid GPU VRAM issues; you can opt-in to CUDA via environment variables.
+
+## Features
+
+- **Async FastAPI endpoint** with threadpool offloading
+- **Model load on startup** with health and readiness probes
+- **Input validation** (max items, max text length) with CORS enabled
+- **Configurable** via environment variables
+- **Enhanced error handling** with detailed error messages
+- **Improved logging** with file output capability
+- **Comprehensive test suite** with coverage for error conditions
+- **Graceful handling** of model loading failures
+
+## Requirements
+
 - Python 3.11+
-- PyTorch (CPU or CUDA build) and sentence-transformers.
+- PyTorch (CPU or CUDA build) and sentence-transformers
 
-Install with uv (recommended)
-- Project already lists dependencies in `pyproject.toml`. Use uv to resolve and install into `.venv`.
+## Installation with uv (recommended)
+
+The project already lists dependencies in `pyproject.toml`. Use uv to resolve and install into `.venv`.
 
 ```bash
-# create/refresh .venv and install deps from pyproject
+# Create/refresh .venv and install deps from pyproject
 uv sync
 
 # Install development dependencies (optional)
 uv sync --extra dev
 
-# activate venv (optional, but nice for shell tools)
+# Activate venv (optional, but nice for shell tools)
 source .venv/bin/activate
 ```
 
+## Quick Run with uv
 
+You can run the server without manually activating the virtual environment:
 
-Quick run với uv (không cần kích hoạt venv thủ công)
----------------------------------------------------
 ```bash
-# Port mặc định của uvicorn là 8000. Để đổi port, bạn PHẢI export PORT hoặc chỉ định --port khi chạy uvicorn.
-# EMBED_PORT chỉ dùng cho app nội bộ, không ảnh hưởng đến uvicorn.
+# Default uvicorn port is 8000. To change the port, you MUST export PORT or specify --port when running uvicorn.
+# EMBED_PORT is only used internally and does not affect uvicorn.
 
-# Cách 1: export PORT từ .env.local (khuyên dùng)
+# Method 1: Export PORT from .env.local (recommended)
 export $(grep -v '^#' .env.local | xargs)
 uv run uvicorn main:app --host 0.0.0.0 --workers 1
 
-# Cách 2: chỉ định --port trực tiếp
+# Method 2: Specify --port directly
 uv run uvicorn main:app --host 0.0.0.0 --port 7979 --workers 1
 
-# Nếu cần CUDA (đảm bảo torch build đúng)
+# For CUDA support (ensure torch build is correct)
 EMBED_DEVICE=cuda uv run uvicorn main:app --host 0.0.0.0 --port 7979 --workers 1
 ```
 
+## Environment Variables
 
-Environment variables
----------------------
-Bạn nên cấu hình các biến môi trường trong file `.env.local` (đã có sẵn mẫu, tự động bị ignore bởi git):
+You should configure environment variables in the `.env.local` file (a sample is already provided and automatically ignored by git):
 
 ```env
 # .env.local
@@ -69,22 +75,21 @@ EMBED_SKIP_MODEL_LOAD=0
 EMBED_MODEL_CACHE= # Optional: set model cache dir (HuggingFace cache)
 ```
 
-Khi chạy bằng uv hoặc uvicorn, các biến trong `.env.local` sẽ tự động được nạp nếu bạn dùng [uv](https://github.com/astral-sh/uv) hoặc [python-dotenv]. Nếu không, bạn có thể export thủ công:
+When running with uv or uvicorn, variables in `.env.local` will be automatically loaded if you use [uv](https://github.com/astral-sh/uv) or [python-dotenv]. Otherwise, you can export them manually:
 
 ```bash
 export $(grep -v '^#' .env.local | xargs)
 ```
 
-Port mặc định của uvicorn là **8000**. Để đổi port, bạn phải export PORT hoặc chỉ định --port khi chạy uvicorn.
-**Lưu ý:** EMBED_PORT chỉ dùng cho app nội bộ, không ảnh hưởng đến uvicorn.
+Note: The default uvicorn port is **8000**. To change the port, you must export PORT or specify --port when running uvicorn. 
+**Important:** EMBED_PORT is only used internally and does not affect uvicorn.
 
+## Logging
 
-Logging
--------
 The application uses a logging configuration file (`logging.conf`) to manage log output. By default, logs are written to both the console and a file named `embedding-server.log` in the root directory. You can modify the `logging.conf` file to change the logging behavior, such as log file location, log levels, or formatting.
 
-Run tests (optional)
---------------------
+## Running Tests (Optional)
+
 ```bash
 # Run tests
 uv run pytest -v
@@ -96,20 +101,23 @@ uv run pytest -v --cov=main tests/
 uv run pytest -v --cov=main --cov-report=html tests/
 ```
 
-Endpoints
-- GET /health: Basic health info (model/device/ready).
-- GET /ready: Readiness flag.
-- POST /embed/: Body {"texts": ["..."]} returns embeddings.
+## API Endpoints
 
-Example request
+- `GET /health`: Basic health info (model/device/ready)
+- `GET /ready`: Readiness flag
+- `POST /embed/`: Body `{"texts": ["..."]}` returns embeddings
+
+### Example Request
+
 ```bash
 curl -s http://localhost:8000/embed/ \
-	-H 'Content-Type: application/json' \
-	-d '{"texts": ["Xin chao", "Hello world!"]}' | jq
+    -H 'Content-Type: application/json' \
+    -d '{"texts": ["Xin chao", "Hello world!"]}' | jq
 ```
 
-Notes
-- When using GPU, keep workers=1 to avoid multiple processes loading the same model.
-- For scaling, prefer multiple instances behind a load balancer rather than multi-process sharing a single GPU.
-- The application gracefully handles model loading failures, logging the error and marking the service as not ready.
-- CORS is configured to allow all origins by default, but you should specify exact origins in production for security.
+## Notes
+
+- When using GPU, keep `workers=1` to avoid multiple processes loading the same model
+- For scaling, prefer multiple instances behind a load balancer rather than multi-process sharing a single GPU
+- The application gracefully handles model loading failures, logging the error and marking the service as not ready
+- CORS is configured to allow all origins by default, but you should specify exact origins in production for security
